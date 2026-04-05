@@ -171,13 +171,21 @@ try {
         if (-not $ollamaCmd) {
             Write-Host ""
             Write-Host "  [2/3] Ollama" -ForegroundColor Cyan
-            $ollamaInstaller = Join-Path $env:TEMP "OllamaSetup.exe"
-            Download-File -Url "https://ollama.com/download/OllamaSetup.exe" -OutPath $ollamaInstaller -Label "Downloading Ollama installer..."
 
-            # Silent install with spinner (NSIS uses /S)
-            $installerPath = $ollamaInstaller
-            Start-Spinner -Label "Installing Ollama (silent install, 30-90 seconds)..." -Action {
-                Start-Process -FilePath $using:installerPath -ArgumentList "/S" -Wait
+            # Prefer winget for guaranteed silent install
+            $winget = Get-Command winget -ErrorAction SilentlyContinue
+            if ($winget) {
+                Start-Spinner -Label "Installing Ollama via winget (30-120 seconds)..." -Action {
+                    & winget install Ollama.Ollama --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
+                }
+            } else {
+                $ollamaInstaller = Join-Path $env:TEMP "OllamaSetup.exe"
+                Download-File -Url "https://ollama.com/download/OllamaSetup.exe" -OutPath $ollamaInstaller -Label "Downloading Ollama installer..."
+                $installerPath = $ollamaInstaller
+                Start-Spinner -Label "Installing Ollama (30-90 seconds)..." -Action {
+                    # Try multiple silent flags in sequence
+                    Start-Process -FilePath $using:installerPath -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait -ErrorAction SilentlyContinue
+                }
             }
 
             $ollamaPath = "$env:LOCALAPPDATA\Programs\Ollama"
@@ -186,7 +194,7 @@ try {
             # Kill Ollama GUI app (we only need the service)
             Start-Sleep -Seconds 2
             Get-Process -Name "ollama app" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-            Get-Process -Name "Ollama" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process | Where-Object { $_.ProcessName -like "*ollama*" -and $_.MainWindowTitle } | Stop-Process -Force -ErrorAction SilentlyContinue
         } else {
             Write-Host ""
             Write-Host "  [2/3] Ollama already installed." -ForegroundColor Green
