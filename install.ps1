@@ -167,15 +167,13 @@ try {
         Write-Host "  [1/3] vix" -ForegroundColor Cyan
         $vixExe = Install-VixBinary -InstallDir $installDir
 
-        $ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
         $ollamaPortablePath = Join-Path $env:USERPROFILE ".vix\ollama"
-        $ollamaPortableExe = Join-Path $ollamaPortablePath "ollama.exe"
+        $ollamaExe = Join-Path $ollamaPortablePath "ollama.exe"
 
-        if (-not $ollamaCmd -and -not (Test-Path $ollamaPortableExe)) {
+        if (-not (Test-Path $ollamaExe)) {
             Write-Host ""
             Write-Host "  [2/3] Ollama" -ForegroundColor Cyan
 
-            # Download portable ZIP (no installer, no GUI)
             $ollamaZip = Join-Path $env:TEMP "ollama-windows-amd64.zip"
             Download-File -Url "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip" -OutPath $ollamaZip -Label "Downloading Ollama portable..."
 
@@ -184,34 +182,52 @@ try {
             Expand-Archive -Path $ollamaZip -DestinationPath $ollamaPortablePath -Force
             Remove-Item $ollamaZip -ErrorAction SilentlyContinue
             Write-Host "    Done." -ForegroundColor Green
-
-            $env:PATH = "$ollamaPortablePath;$env:PATH"
-        } elseif (Test-Path $ollamaPortableExe) {
-            Write-Host ""
-            Write-Host "  [2/3] Ollama portable already installed." -ForegroundColor Green
-            $env:PATH = "$ollamaPortablePath;$env:PATH"
         } else {
             Write-Host ""
             Write-Host "  [2/3] Ollama already installed." -ForegroundColor Green
         }
 
-        # Ensure ollama serve is running (but GUI is killed)
-        $ollamaServing = $false
-        try {
-            $test = Invoke-WebRequest -Uri "http://localhost:11434" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-            $ollamaServing = $true
-        } catch {}
+        $env:PATH = "$ollamaPortablePath;$env:PATH"
 
-        if (-not $ollamaServing) {
-            Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden
-            Start-Sleep -Seconds 3
+        # Kill any existing ollama processes, then start our portable one
+        Get-Process -Name "ollama" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Get-Process -Name "ollama app" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+
+        Write-Host "    Starting Ollama service..."
+        Start-Process -FilePath $ollamaExe -ArgumentList "serve" -WindowStyle Hidden
+
+        # Wait for Ollama to be ready (up to 15 seconds)
+        $ready = $false
+        for ($i = 0; $i -lt 15; $i++) {
+            Start-Sleep -Seconds 1
+            try {
+                $null = Invoke-WebRequest -Uri "http://localhost:11434" -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
+                $ready = $true
+                break
+            } catch {}
         }
+        if (-not $ready) {
+            Write-Host "    Warning: Ollama did not start within 15s" -ForegroundColor Yellow
+        }
+
+        # Set up auto-start on login via Windows startup
+        $startupBat = Join-Path $env:USERPROFILE ".vix\start-ollama.bat"
+        @"
+@echo off
+tasklist /FI "IMAGENAME eq ollama.exe" 2>NUL | find /I "ollama.exe" >NUL
+if errorlevel 1 start "" /B "$ollamaExe" serve
+"@ | Set-Content -Path $startupBat -Encoding ASCII
+
+        $startupFolder = [Environment]::GetFolderPath("Startup")
+        $startupLink = Join-Path $startupFolder "vix-ollama.bat"
+        Copy-Item $startupBat $startupLink -Force -ErrorAction SilentlyContinue
 
         Write-Host ""
         Write-Host "  [3/3] $mn ($ms)" -ForegroundColor Cyan
         Write-Host "    Downloading model (ollama will show progress)..."
         Write-Host ""
-        & ollama pull $model
+        & $ollamaExe pull $model
         Write-Host ""
 
         Save-Config -ConfigDir $configDir -Model $model -Mode "local"
