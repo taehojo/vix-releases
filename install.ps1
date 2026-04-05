@@ -196,11 +196,19 @@ try {
         Get-Process -Name "ollama app" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
 
-        Write-Host "    Starting Ollama service (keep-alive: 24h)..."
+        Write-Host "    Starting Ollama service (keep-alive: 24h, hidden)..."
         # Set env var for the ollama serve process to keep models loaded
         $env:OLLAMA_KEEP_ALIVE = "24h"
         [Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "24h", "User")
-        Start-Process -FilePath $ollamaExe -ArgumentList "serve" -WindowStyle Hidden
+        # Use VBS wrapper for fully hidden execution (no cmd window)
+        $tempVbs = Join-Path $env:TEMP "vix-ollama-launch.vbs"
+        $launchVbs = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """$ollamaExe"" serve", 0, False
+Set WshShell = Nothing
+"@
+        $launchVbs | Set-Content -Path $tempVbs -Encoding ASCII
+        Start-Process wscript.exe -ArgumentList $tempVbs -WindowStyle Hidden
 
         # Wait for Ollama to be ready (up to 15 seconds)
         $ready = $false
@@ -216,17 +224,18 @@ try {
             Write-Host "    Warning: Ollama did not start within 15s" -ForegroundColor Yellow
         }
 
-        # Set up auto-start on login via Windows startup
-        $startupBat = Join-Path $env:USERPROFILE ".vix\start-ollama.bat"
-        @"
-@echo off
-tasklist /FI "IMAGENAME eq ollama.exe" 2>NUL | find /I "ollama.exe" >NUL
-if errorlevel 1 start "" /B "$ollamaExe" serve
-"@ | Set-Content -Path $startupBat -Encoding ASCII
-
+        # Set up auto-start on login via Windows startup (hidden VBS)
         $startupFolder = [Environment]::GetFolderPath("Startup")
-        $startupLink = Join-Path $startupFolder "vix-ollama.bat"
-        Copy-Item $startupBat $startupLink -Force -ErrorAction SilentlyContinue
+        # Remove old bat-based startup if exists
+        Remove-Item (Join-Path $startupFolder "vix-ollama.bat") -ErrorAction SilentlyContinue
+
+        $vbsPath = Join-Path $startupFolder "vix-ollama.vbs"
+        $vbsContent = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """$ollamaExe"" serve", 0, False
+Set WshShell = Nothing
+"@
+        $vbsContent | Set-Content -Path $vbsPath -Encoding ASCII
 
         Write-Host ""
         Write-Host "  [3/3] $mn ($ms)" -ForegroundColor Cyan
