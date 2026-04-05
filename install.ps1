@@ -196,7 +196,10 @@ try {
         Get-Process -Name "ollama app" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
 
-        Write-Host "    Starting Ollama service..."
+        Write-Host "    Starting Ollama service (keep-alive: 24h)..."
+        # Set env var for the ollama serve process to keep models loaded
+        $env:OLLAMA_KEEP_ALIVE = "24h"
+        [Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "24h", "User")
         Start-Process -FilePath $ollamaExe -ArgumentList "serve" -WindowStyle Hidden
 
         # Wait for Ollama to be ready (up to 15 seconds)
@@ -231,6 +234,18 @@ if errorlevel 1 start "" /B "$ollamaExe" serve
         Write-Host ""
         & $ollamaExe pull $model
         Write-Host ""
+
+        # Pre-warm: load model into memory now
+        Write-Host "    Pre-warming model (loading into VRAM/RAM)..."
+        $warmBody = '{"model":"' + $model + '","prompt":"hi","stream":false,"keep_alive":"24h"}'
+        $warmStart = Get-Date
+        try {
+            $null = Invoke-WebRequest -Uri "http://127.0.0.1:11434/api/generate" -Method POST -Body $warmBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 180
+            $warmElapsed = [math]::Round(((Get-Date) - $warmStart).TotalSeconds, 1)
+            Write-Host "    Model loaded! (${warmElapsed}s)" -ForegroundColor Green
+        } catch {
+            Write-Host "    Warning: Pre-warm failed, first query will be slower" -ForegroundColor Yellow
+        }
 
         Save-Config -ConfigDir $configDir -Model $model -Mode "local"
         Setup-Path -InstallDir $installDir
