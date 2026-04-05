@@ -1,39 +1,71 @@
 $tempScript = Join-Path $env:TEMP "vix-install.ps1"
 
 @'
-function Download-WithProgress {
+$ProgressPreference = "Continue"
+
+function Download-File {
     param($Url, $OutPath, $Label)
-    $uri = [System.Uri]$Url
-    $req = [System.Net.HttpWebRequest]::Create($uri)
-    $req.UserAgent = "vix-installer"
-    $resp = $req.GetResponse()
-    $total = $resp.ContentLength
-    $stream = $resp.GetResponseStream()
-    $file = [System.IO.File]::Create($OutPath)
-    $buffer = New-Object byte[] 65536
-    $totalRead = 0
-    $lastPercent = -1
-    try {
-        do {
-            $read = $stream.Read($buffer, 0, $buffer.Length)
-            if ($read -gt 0) {
-                $file.Write($buffer, 0, $read)
-                $totalRead += $read
-                if ($total -gt 0) {
-                    $percent = [math]::Floor(($totalRead / $total) * 100)
-                    if ($percent -ne $lastPercent) {
+    Write-Host "    $Label"
+    # Use Windows built-in curl.exe which shows inline progress
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        & curl.exe -# -fL -o $OutPath $Url
+        if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
+    } else {
+        # Fallback to .NET with manual progress
+        $uri = [System.Uri]$Url
+        $req = [System.Net.HttpWebRequest]::Create($uri)
+        $req.UserAgent = "vix-installer"
+        $resp = $req.GetResponse()
+        $total = $resp.ContentLength
+        $stream = $resp.GetResponseStream()
+        $file = [System.IO.File]::Create($OutPath)
+        $buffer = New-Object byte[] 65536
+        $totalRead = 0
+        $lastLine = ""
+        try {
+            do {
+                $read = $stream.Read($buffer, 0, $buffer.Length)
+                if ($read -gt 0) {
+                    $file.Write($buffer, 0, $read)
+                    $totalRead += $read
+                    if ($total -gt 0) {
                         $mb = [math]::Round($totalRead / 1MB, 1)
                         $totalMb = [math]::Round($total / 1MB, 1)
-                        Write-Progress -Activity $Label -Status "$mb MB / $totalMb MB" -PercentComplete $percent
-                        $lastPercent = $percent
+                        $pct = [math]::Floor(($totalRead / $total) * 100)
+                        $bar = "#" * [math]::Floor($pct / 5)
+                        $bar = $bar.PadRight(20, "-")
+                        $line = "    [$bar] $pct% ($mb/$totalMb MB)"
+                        if ($line -ne $lastLine) {
+                            Write-Host "`r$line" -NoNewline
+                            $lastLine = $line
+                        }
                     }
                 }
-            }
-        } while ($read -gt 0)
-    } finally {
-        $file.Close(); $stream.Close(); $resp.Close()
+            } while ($read -gt 0)
+            Write-Host ""
+        } finally {
+            $file.Close(); $stream.Close(); $resp.Close()
+        }
     }
-    Write-Progress -Activity $Label -Completed
+}
+
+function Start-Spinner {
+    param($Label, $Action)
+    $job = Start-Job -ScriptBlock $Action
+    $spinner = @('|', '/', '-', '\')
+    $i = 0
+    $startTime = Get-Date
+    while ($job.State -eq 'Running') {
+        $elapsed = [int]((Get-Date) - $startTime).TotalSeconds
+        Write-Host "`r    $($spinner[$i % 4]) $Label ($elapsed`s)" -NoNewline
+        Start-Sleep -Milliseconds 200
+        $i++
+    }
+    $elapsed = [int]((Get-Date) - $startTime).TotalSeconds
+    Write-Host "`r    $Label done ($elapsed`s)                    "
+    Receive-Job $job -ErrorAction SilentlyContinue | Out-Null
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
 }
 
 function Install-VixBinary {
@@ -42,7 +74,7 @@ function Install-VixBinary {
     $ver = $rel.tag_name
     $url = "https://github.com/taehojo/vix-releases/releases/download/$ver/vix-windows-x64.exe"
     $out = Join-Path $InstallDir "vix.exe"
-    Download-WithProgress -Url $url -OutPath $out -Label "Downloading vix $ver"
+    Download-File -Url $url -OutPath $out -Label "Downloading vix $ver..."
     return $out
 }
 
@@ -74,7 +106,6 @@ try {
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 
-    # === Choose mode ===
     Write-Host "  Choose how to use vix:" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "    1) Local LLM - free, unlimited, offline (recommended)" -ForegroundColor Green
@@ -133,19 +164,26 @@ try {
         if ($confirm -eq "n" -or $confirm -eq "N") { Write-Host "  Cancelled."; return }
         Write-Host ""
 
-        Write-Host "  [1/3] Downloading vix..." -ForegroundColor Cyan
+        Write-Host "  [1/3] vix" -ForegroundColor Cyan
         $vixExe = Install-VixBinary -InstallDir $installDir
 
         $ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
         if (-not $ollamaCmd) {
-            Write-Host "  [2/3] Installing Ollama..." -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  [2/3] Ollama" -ForegroundColor Cyan
             $ollamaInstaller = Join-Path $env:TEMP "OllamaSetup.exe"
-            Download-WithProgress -Url "https://ollama.com/download/OllamaSetup.exe" -OutPath $ollamaInstaller -Label "Downloading Ollama"
-            Write-Host "        Running installer (silent)..."
-            Start-Process -FilePath $ollamaInstaller -ArgumentList "/SILENT" -Wait
+            Download-File -Url "https://ollama.com/download/OllamaSetup.exe" -OutPath $ollamaInstaller -Label "Downloading Ollama installer..."
+
+            # Silent install with spinner
+            $installerPath = $ollamaInstaller
+            Start-Spinner -Label "Installing Ollama (silent install, this takes 30-90 seconds)..." -Action {
+                Start-Process -FilePath $using:installerPath -ArgumentList "/SILENT" -Wait
+            }
+
             $ollamaPath = "$env:LOCALAPPDATA\Programs\Ollama"
             if (Test-Path $ollamaPath) { $env:PATH = "$ollamaPath;$env:PATH" }
         } else {
+            Write-Host ""
             Write-Host "  [2/3] Ollama already installed." -ForegroundColor Green
         }
 
@@ -155,7 +193,9 @@ try {
             Start-Sleep -Seconds 3
         }
 
-        Write-Host "  [3/3] Downloading $mn ($ms)..." -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  [3/3] $mn ($ms)" -ForegroundColor Cyan
+        Write-Host "    Downloading model (ollama will show progress)..."
         Write-Host ""
         & ollama pull $model
         Write-Host ""
@@ -209,10 +249,9 @@ try {
             return
         }
 
-        Write-Host "  [1/1] Downloading vix..." -ForegroundColor Cyan
+        Write-Host "  [1/1] vix" -ForegroundColor Cyan
         $vixExe = Install-VixBinary -InstallDir $installDir
 
-        # Save API key as user environment variable
         [Environment]::SetEnvironmentVariable($keyVar, $apiKey, "User")
         Set-Item -Path "env:$keyVar" -Value $apiKey
 
