@@ -174,21 +174,32 @@ try {
             $ollamaInstaller = Join-Path $env:TEMP "OllamaSetup.exe"
             Download-File -Url "https://ollama.com/download/OllamaSetup.exe" -OutPath $ollamaInstaller -Label "Downloading Ollama installer..."
 
-            # Silent install with spinner
+            # Silent install with spinner (NSIS uses /S)
             $installerPath = $ollamaInstaller
-            Start-Spinner -Label "Installing Ollama (silent install, this takes 30-90 seconds)..." -Action {
-                Start-Process -FilePath $using:installerPath -ArgumentList "/SILENT" -Wait
+            Start-Spinner -Label "Installing Ollama (silent install, 30-90 seconds)..." -Action {
+                Start-Process -FilePath $using:installerPath -ArgumentList "/S" -Wait
             }
 
             $ollamaPath = "$env:LOCALAPPDATA\Programs\Ollama"
             if (Test-Path $ollamaPath) { $env:PATH = "$ollamaPath;$env:PATH" }
+
+            # Kill Ollama GUI app (we only need the service)
+            Start-Sleep -Seconds 2
+            Get-Process -Name "ollama app" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process -Name "Ollama" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | Stop-Process -Force -ErrorAction SilentlyContinue
         } else {
             Write-Host ""
             Write-Host "  [2/3] Ollama already installed." -ForegroundColor Green
         }
 
-        $ollamaProc = Get-Process ollama -ErrorAction SilentlyContinue
-        if (-not $ollamaProc) {
+        # Ensure ollama serve is running (but GUI is killed)
+        $ollamaServing = $false
+        try {
+            $test = Invoke-WebRequest -Uri "http://localhost:11434" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            $ollamaServing = $true
+        } catch {}
+
+        if (-not $ollamaServing) {
             Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden
             Start-Sleep -Seconds 3
         }
