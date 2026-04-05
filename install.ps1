@@ -152,7 +152,9 @@ try {
         if     ($vramGb -ge 80) { $model = "qwen2.5:72b"; $mn = "Qwen 2.5 72B"; $ms = "47GB" }
         elseif ($vramGb -ge 24) { $model = "qwen2.5-coder:32b"; $mn = "Qwen 2.5 Coder 32B"; $ms = "20GB" }
         elseif ($vramGb -ge 12) { $model = "deepseek-coder-v2:16b"; $mn = "DeepSeek Coder V2 16B"; $ms = "9GB" }
-        elseif ($vramGb -ge 6)  { $model = "qwen2.5-coder:7b"; $mn = "Qwen 2.5 Coder 7B"; $ms = "4.7GB" }
+        elseif ($vramGb -ge 8)  { $model = "qwen2.5-coder:7b"; $mn = "Qwen 2.5 Coder 7B"; $ms = "4.7GB" }
+        elseif ($vramGb -ge 5)  { $model = "qwen2.5-coder:3b"; $mn = "Qwen 2.5 Coder 3B"; $ms = "1.9GB" }
+        elseif ($vramGb -ge 4)  { $model = "qwen2.5-coder:1.5b"; $mn = "Qwen 2.5 Coder 1.5B"; $ms = "986MB" }
         elseif ($ramGb -ge 16)  { $model = "gemma3:4b"; $mn = "Gemma 3 4B"; $ms = "3.3GB" }
         elseif ($ramGb -ge 8)   { $model = "gemma3:1b"; $mn = "Gemma 3 1B"; $ms = "815MB" }
         else                    { $model = "llama3.2:1b"; $mn = "Llama 3.2 1B"; $ms = "1.3GB" }

@@ -141,8 +141,12 @@ if [ "$mode" = "1" ]; then
     MODEL="qwen2.5-coder:32b"; MODEL_NAME="Qwen 2.5 Coder 32B"; MODEL_SIZE="20GB"
   elif [ "$VRAM_GB" -ge 12 ]; then
     MODEL="deepseek-coder-v2:16b"; MODEL_NAME="DeepSeek Coder V2 16B"; MODEL_SIZE="9GB"
-  elif [ "$VRAM_GB" -ge 6 ]; then
+  elif [ "$VRAM_GB" -ge 8 ]; then
     MODEL="qwen2.5-coder:7b"; MODEL_NAME="Qwen 2.5 Coder 7B"; MODEL_SIZE="4.7GB"
+  elif [ "$VRAM_GB" -ge 5 ]; then
+    MODEL="qwen2.5-coder:3b"; MODEL_NAME="Qwen 2.5 Coder 3B"; MODEL_SIZE="1.9GB"
+  elif [ "$VRAM_GB" -ge 4 ]; then
+    MODEL="qwen2.5-coder:1.5b"; MODEL_NAME="Qwen 2.5 Coder 1.5B"; MODEL_SIZE="986MB"
   elif [ "$RAM_GB" -ge 16 ]; then
     MODEL="gemma3:4b"; MODEL_NAME="Gemma 3 4B"; MODEL_SIZE="3.3GB"
   elif [ "$RAM_GB" -ge 8 ]; then
