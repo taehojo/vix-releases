@@ -168,33 +168,28 @@ try {
         $vixExe = Install-VixBinary -InstallDir $installDir
 
         $ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
-        if (-not $ollamaCmd) {
+        $ollamaPortablePath = Join-Path $env:USERPROFILE ".vix\ollama"
+        $ollamaPortableExe = Join-Path $ollamaPortablePath "ollama.exe"
+
+        if (-not $ollamaCmd -and -not (Test-Path $ollamaPortableExe)) {
             Write-Host ""
             Write-Host "  [2/3] Ollama" -ForegroundColor Cyan
 
-            # Prefer winget for guaranteed silent install
-            $winget = Get-Command winget -ErrorAction SilentlyContinue
-            if ($winget) {
-                Start-Spinner -Label "Installing Ollama via winget (30-120 seconds)..." -Action {
-                    & winget install Ollama.Ollama --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
-                }
-            } else {
-                $ollamaInstaller = Join-Path $env:TEMP "OllamaSetup.exe"
-                Download-File -Url "https://ollama.com/download/OllamaSetup.exe" -OutPath $ollamaInstaller -Label "Downloading Ollama installer..."
-                $installerPath = $ollamaInstaller
-                Start-Spinner -Label "Installing Ollama (30-90 seconds)..." -Action {
-                    # Try multiple silent flags in sequence
-                    Start-Process -FilePath $using:installerPath -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait -ErrorAction SilentlyContinue
-                }
-            }
+            # Download portable ZIP (no installer, no GUI)
+            $ollamaZip = Join-Path $env:TEMP "ollama-windows-amd64.zip"
+            Download-File -Url "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip" -OutPath $ollamaZip -Label "Downloading Ollama portable..."
 
-            $ollamaPath = "$env:LOCALAPPDATA\Programs\Ollama"
-            if (Test-Path $ollamaPath) { $env:PATH = "$ollamaPath;$env:PATH" }
+            Write-Host "    Extracting..."
+            New-Item -ItemType Directory -Force -Path $ollamaPortablePath | Out-Null
+            Expand-Archive -Path $ollamaZip -DestinationPath $ollamaPortablePath -Force
+            Remove-Item $ollamaZip -ErrorAction SilentlyContinue
+            Write-Host "    Done." -ForegroundColor Green
 
-            # Kill Ollama GUI app (we only need the service)
-            Start-Sleep -Seconds 2
-            Get-Process -Name "ollama app" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-            Get-Process | Where-Object { $_.ProcessName -like "*ollama*" -and $_.MainWindowTitle } | Stop-Process -Force -ErrorAction SilentlyContinue
+            $env:PATH = "$ollamaPortablePath;$env:PATH"
+        } elseif (Test-Path $ollamaPortableExe) {
+            Write-Host ""
+            Write-Host "  [2/3] Ollama portable already installed." -ForegroundColor Green
+            $env:PATH = "$ollamaPortablePath;$env:PATH"
         } else {
             Write-Host ""
             Write-Host "  [2/3] Ollama already installed." -ForegroundColor Green
